@@ -1,0 +1,53 @@
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, status
+from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.api.dependencies import get_current_user, get_db
+from app.models.user import User
+from app.models.app_data import AppData
+from app.schemas.sync import SyncResponse
+from app.services import sync_service
+
+router = APIRouter()
+
+@router.get("/status")
+async def sync_status(current_user: User = Depends(get_current_user)):
+    """Simple protected endpoint to verify the sync service and active user."""
+    return {"message": f"Sync service is active for user: {current_user.username}"}
+
+@router.post("/upload", response_model=SyncResponse)
+async def upload_sync_data(
+    app_name: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Upload physical app data and update metadata."""
+    app_data = await sync_service.process_file_upload(db, current_user, app_name, file)
+    
+    return SyncResponse(
+        message="Successfully synchronized file",
+        cloud_path=app_data.cloud_path,
+        updated_at=app_data.updated_at
+    )
+
+@router.get("/download/{app_name}")
+async def download_sync_data(
+    app_name: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Download physical app data enforcing ownership."""
+    stmt = select(AppData).where(AppData.user_id == current_user.id, AppData.app_name == app_name)
+    result = await db.execute(stmt)
+    app_data = result.scalars().first()
+    
+    if not app_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="App data not found for the requested application"
+        )
+        
+    # the frontend client will download the literal .zip file representation
+    return FileResponse(path=app_data.cloud_path, filename=f"{app_name}.zip")

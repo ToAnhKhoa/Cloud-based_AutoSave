@@ -1,0 +1,19 @@
+# Môi trường ảo Python
+venv/
+env/
+.env
+
+# Các file rác và bộ nhớ đệm của Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database nội bộ (Không đẩy file save thật hoặc CSDL lên mạng)
+*.sqlite3
+*.db
+backend/storage/
+client/local_mapping.json
+
+# Các file cấu hình hệ điều hành
+.DS_Store
+Thumbs.db
