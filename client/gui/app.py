@@ -3,6 +3,7 @@ import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
 import os
 from core.mapping_manager import MappingManager
+from core.api_client import SessionExpiredError
 import queue
 
 class DashboardFrame(ctk.CTkFrame):
@@ -36,12 +37,36 @@ class DashboardFrame(ctk.CTkFrame):
         self.mappings_frame.grid_columnconfigure(1, weight=1)
         
         # Initialize
+        self.cloud_apps = []
         self.refresh_mapping_list()
         
         # Thread-safe UI queue
         self.message_queue = queue.Queue()
         self.check_queue()
         
+        import threading
+        threading.Thread(target=self._fetch_cloud_apps, daemon=True).start()
+
+    def _fetch_cloud_apps(self):
+        try:
+            apps = self.api_client.get_cloud_apps()
+            self.after(0, self._render_ghost_apps, apps)
+        except SessionExpiredError:
+            self.after(0, self.master.logout)
+
+    def _render_ghost_apps(self, cloud_apps):
+        self.cloud_apps = cloud_apps
+        self.refresh_mapping_list()
+
+    def map_ghost_app(self, app_name):
+        folder_selected = filedialog.askdirectory(title=f"Select folder for {app_name}")
+        if folder_selected:
+            self.mapping_manager.add_mapping(app_name, folder_selected)
+            self.refresh_mapping_list()
+            if hasattr(self.master, "sync_engine") and getattr(self.master, "sync_engine"):
+                self.master.sync_engine.refresh_watchers()
+                self.master.sync_engine.initial_scan(app_name, folder_selected)
+
     def check_queue(self):
         try:
             while True:
@@ -68,7 +93,11 @@ class DashboardFrame(ctk.CTkFrame):
         self.message_queue.put({"type": "timestamp", "app_name": app_name, "ts": timestamp_str})
 
     def handle_manual_sync(self, app_name, folder_path):
-        cloud_info = self.api_client.get_save_info(app_name)
+        try:
+            cloud_info = self.api_client.get_save_info(app_name)
+        except SessionExpiredError:
+            self.master.logout()
+            return
         
         newest_mtime = 0
         if os.path.exists(folder_path):
@@ -130,8 +159,9 @@ class DashboardFrame(ctk.CTkFrame):
         self.last_synced_times = {}
             
         mappings = self.mapping_manager.load_mappings()
+        ghost_apps = [app for app in getattr(self, "cloud_apps", []) if app not in mappings]
         
-        if not mappings:
+        if not mappings and not ghost_apps:
             # Show friendly message
             no_data_label = ctk.CTkLabel(self.mappings_frame, text="No applications mapped yet. Add one to get started!", text_color="gray")
             no_data_label.grid(row=0, column=0, columnspan=2, pady=20)
@@ -161,7 +191,8 @@ class DashboardFrame(ctk.CTkFrame):
 
         import threading
         # Draw rows dynamically
-        for idx, (app_name, path) in enumerate(mappings.items()):
+        idx = 0
+        for app_name, path in mappings.items():
             row_frame = ctk.CTkFrame(self.mappings_frame, corner_radius=8)
             row_frame.grid(row=idx, column=0, columnspan=2, sticky="ew", pady=5, padx=5)
             row_frame.grid_columnconfigure(0, weight=1)
@@ -192,6 +223,35 @@ class DashboardFrame(ctk.CTkFrame):
                 command=lambda a=app_name, p=path: self.handle_manual_sync(a, p)
             )
             pull_btn.grid(row=0, column=2, padx=(0, 15), pady=10, sticky="e")
+            idx += 1
+
+        for app_name in ghost_apps:
+            row_frame = ctk.CTkFrame(self.mappings_frame, corner_radius=8)
+            row_frame.grid(row=idx, column=0, columnspan=2, sticky="ew", pady=5, padx=5)
+            row_frame.grid_columnconfigure(0, weight=1)
+            row_frame.grid_columnconfigure(1, weight=1)
+            row_frame.grid_columnconfigure(2, weight=0)
+            
+            info_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+            info_frame.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+            
+            name_label = ctk.CTkLabel(info_frame, text=app_name, font=ctk.CTkFont(size=14, weight="bold"))
+            name_label.grid(row=0, column=0, sticky="w")
+            
+            path_label = ctk.CTkLabel(info_frame, text="No local folder mapped", text_color="gray", font=ctk.CTkFont(size=12))
+            path_label.grid(row=1, column=0, sticky="w")
+            
+            status_label = ctk.CTkLabel(row_frame, text="☁️ Not Mapped", text_color="#bdc3c7", font=ctk.CTkFont(size=12))
+            status_label.grid(row=0, column=1, padx=15, pady=10, sticky="e")
+            
+            pull_btn = ctk.CTkButton(
+                row_frame, 
+                text="Map Folder 📁", 
+                width=120, 
+                command=lambda a=app_name: self.map_ghost_app(a)
+            )
+            pull_btn.grid(row=0, column=2, padx=(0, 15), pady=10, sticky="e")
+            idx += 1
             
     def open_add_app_popup(self):
         popup = ctk.CTkToplevel(self)

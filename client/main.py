@@ -1,4 +1,8 @@
 import customtkinter as ctk
+import pystray
+from PIL import Image, ImageDraw
+import threading
+from tkinter import messagebox
 from core.api_client import APIClient
 from gui.login import LoginFrame
 from gui.app import DashboardFrame, SettingsFrame
@@ -17,6 +21,9 @@ class App(ctk.CTk):
         self.title("Cloud Save Client")
         self.geometry("900x600")
         
+        # Intercept window close event
+        self.protocol('WM_DELETE_WINDOW', self.hide_to_tray)
+        
         # Centrally instantiate the APIClient
         self.api_client = APIClient(base_url="http://127.0.0.1:8000")
         
@@ -28,10 +35,18 @@ class App(ctk.CTk):
         self.dashboard_button = ctk.CTkButton(self.sidebar_frame, text="Dashboard", command=self.show_dashboard_view)
         self.settings_button = ctk.CTkButton(self.sidebar_frame, text="Settings", command=self.show_settings_view)
         
+        self.logout_button = ctk.CTkButton(
+            self.sidebar_frame, text="Logout", 
+            command=lambda: self.logout("You have successfully logged out."),
+            fg_color="#c0392b", hover_color="#e74c3c"
+        )
+        
         # Construct Views, passing down the api_client
-        self.login_frame = LoginFrame(self, api_client=self.api_client, on_login_success=self.show_main_interface)
+        self.login_frame = LoginFrame(self, api_client=self.api_client, on_login_success=self.on_login_success)
         self.dashboard_frame = None
         self.settings_frame = None
+        
+        self.is_logging_out = False
         
         # Start the application by displaying only the login frame
         self.show_login_view()
@@ -47,11 +62,14 @@ class App(ctk.CTk):
             self.settings_frame.grid_forget()
         
         self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=0)
         self.grid_rowconfigure(0, weight=1)
         
         self.login_frame.grid(row=0, column=0, sticky="nsew")
+        if hasattr(self.login_frame, 'reset'):
+            self.login_frame.reset()
         
-    def show_main_interface(self, username):
+    def on_login_success(self, username):
         """
         Transition function called upon successful login.
         """
@@ -71,6 +89,7 @@ class App(ctk.CTk):
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
         self.dashboard_button.grid(row=1, column=0, padx=20, pady=10)
         self.settings_button.grid(row=2, column=0, padx=20, pady=10)
+        self.logout_button.grid(row=4, column=0, padx=20, pady=(10, 20), sticky="s")
         
         # Show default dashboard 
         self.show_dashboard_view()
@@ -82,9 +101,10 @@ class App(ctk.CTk):
             user_id=username,
             api_client=self.api_client,
             status_callback=self.dashboard_frame.update_app_status,
-            timestamp_callback=self.dashboard_frame.set_last_synced
+            timestamp_callback=self.dashboard_frame.set_last_synced,
+            on_auth_error=self.logout
         )
-        self.sync_engine.start()
+        self.sync_engine.run_startup_scan()
         
     def show_dashboard_view(self):
         self.settings_frame.grid_forget()
@@ -93,6 +113,62 @@ class App(ctk.CTk):
     def show_settings_view(self):
         self.dashboard_frame.grid_forget()
         self.settings_frame.grid(row=0, column=1, sticky="nsew")
+
+    def logout(self, message="Your session has expired. Please log in again."):
+        """Tears down local state safely and navigates back to login view."""
+        if self.is_logging_out:
+            return
+            
+        self.is_logging_out = True
+        
+        # Stop file watchers and destroy dependent components
+        if hasattr(self, "sync_engine") and getattr(self, "sync_engine"):
+            self.sync_engine.stop()
+            self.sync_engine = None
+            
+        if getattr(self, "api_client", None):
+            self.api_client.token = None # Clear token logic
+
+        if self.dashboard_frame:
+            self.dashboard_frame.destroy()
+            self.dashboard_frame = None
+            
+        if self.settings_frame:
+            self.settings_frame.destroy()
+            self.settings_frame = None
+            
+        self.show_login_view()
+        
+        # Display the message in main thread async to prevent blocking the teardown
+        self.after(500, lambda: messagebox.showwarning("Session Ended", message))
+        
+        self.after(1000, lambda: setattr(self, 'is_logging_out', False))
+
+    def create_default_icon(self):
+        # Create a simple 64x64 blue square with a white C
+        image = Image.new('RGB', (64, 64), color=(52, 152, 219))
+        dc = ImageDraw.Draw(image)
+        dc.text((20, 15), "C", fill=(255, 255, 255), font=None)
+        return image
+
+    def hide_to_tray(self):
+        self.withdraw()
+        menu = pystray.Menu(
+            pystray.MenuItem('Show App', self.show_from_tray, default=True),
+            pystray.MenuItem('Quit', self.quit_app)
+        )
+        self.tray_icon = pystray.Icon("CloudSave", self.create_default_icon(), "CloudSave Sync", menu)
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def show_from_tray(self, icon, item):
+        icon.stop()
+        self.after(0, self.deiconify)
+
+    def quit_app(self, icon, item):
+        icon.stop()
+        if hasattr(self, 'sync_engine') and self.sync_engine:
+            self.sync_engine.stop()
+        self.after(0, self.destroy)
 
 if __name__ == "__main__":
     app = App()

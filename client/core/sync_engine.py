@@ -6,6 +6,7 @@ import tempfile
 import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from core.api_client import SessionExpiredError
 
 class FolderWatcher(FileSystemEventHandler):
     """
@@ -57,12 +58,13 @@ class SyncEngine:
     """
     Manages background file observation spanning across multiple user mappings.
     """
-    def __init__(self, mapping_manager, user_id: str, api_client, status_callback=None, timestamp_callback=None):
+    def __init__(self, mapping_manager, user_id: str, api_client, status_callback=None, timestamp_callback=None, on_auth_error=None):
         self.mapping_manager = mapping_manager
         self.user_id = user_id
         self.api_client = api_client
         self.status_callback = status_callback
         self.timestamp_callback = timestamp_callback
+        self.on_auth_error = on_auth_error
         self.observer = Observer()
         self.watchers = []
         self.ignored_apps_for_watchdog = set()
@@ -114,6 +116,12 @@ class SyncEngine:
             # Cleanup temp file
             if os.path.exists(zip_path):
                 os.remove(zip_path)
+        except SessionExpiredError:
+            print(f"[SyncEngine] Session expired during upload of {app_name}.")
+            if self.status_callback:
+                self.status_callback(app_name, "🔴 Session Expired", "#e74c3c")
+            if self.on_auth_error:
+                self.on_auth_error()
         except Exception as e:
             print(f"[SyncEngine] Exception during sync: {e}")
             if self.status_callback:
@@ -137,16 +145,22 @@ class SyncEngine:
             if self.status_callback:
                 self.status_callback(app_name, "⬇️ Downloading from Cloud...", "#3498db")
             
-            success = self.api_client.download_save(app_name, folder_path)
-            
-            if success:
-                self.sync_states[app_name] = 'in_sync'
-                self.start_watching(app_name, folder_path)
+            try:
+                success = self.api_client.download_save(app_name, folder_path)
+                
+                if success:
+                    self.sync_states[app_name] = 'in_sync'
+                    self.start_watching(app_name, folder_path)
+                    if self.status_callback:
+                        self.status_callback(app_name, "✅ Restoration Complete!", "#2ecc71")
+                else:
+                    if self.status_callback:
+                        self.status_callback(app_name, "❌ Restoration Failed", "#e74c3c")
+            except SessionExpiredError:
                 if self.status_callback:
-                    self.status_callback(app_name, "✅ Restoration Complete!", "#2ecc71")
-            else:
-                if self.status_callback:
-                    self.status_callback(app_name, "❌ Restoration Failed", "#e74c3c")
+                    self.status_callback(app_name, "🔴 Session Expired", "#e74c3c")
+                if self.on_auth_error:
+                    self.on_auth_error()
             
             time.sleep(2)
             if app_name in self.ignored_apps_for_watchdog:
@@ -213,6 +227,12 @@ class SyncEngine:
                     if self.status_callback:
                         self.status_callback(app_name, "🟢 Monitoring...", "#2ecc71")
                     self.start_watching(app_name, folder_path)
+        except SessionExpiredError:
+            print(f"[Scan Error] Session expired during init scan for {app_name}")
+            if self.status_callback:
+                self.status_callback(app_name, "🔴 Session Expired", "#e74c3c")
+            if self.on_auth_error:
+                self.on_auth_error()
         except Exception as e:
             print(f"[Scan Error] {app_name}: {e}")
             if self.status_callback:
@@ -236,7 +256,7 @@ class SyncEngine:
         
         print(f"[SyncEngine] Watchers cleared! Currently watching 0 folders.")
 
-    def start(self):
+    def run_startup_scan(self):
         """
         Reads mappings, attaches FolderWatchers, and spawns the background thread execution.
         """

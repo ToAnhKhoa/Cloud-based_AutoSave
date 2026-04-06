@@ -76,3 +76,15 @@ async def get_sync_info(
         return {"exists": True, "last_modified": timestamp_str, "size_bytes": size}
     else:
         return {"exists": False}
+
+@router.get("/list")
+async def list_sync_data(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retrieve a list of all application names bound to the cloud context."""
+    stmt = select(AppData.app_name).where(AppData.user_id == current_user.id)
+    result = await db.execute(stmt)
+    apps = result.scalars().all()
+    
+    return {"cloud_apps": list(apps)}
