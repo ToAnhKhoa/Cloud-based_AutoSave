@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, status
 from fastapi.responses import FileResponse
+import os
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -51,3 +53,26 @@ async def download_sync_data(
         
     # the frontend client will download the literal .zip file representation
     return FileResponse(path=app_data.cloud_path, filename=f"{app_name}.zip")
+
+@router.get("/info/{app_name}")
+async def get_sync_info(
+    app_name: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get metadata about a cloud save."""
+    stmt = select(AppData).where(AppData.user_id == current_user.id, AppData.app_name == app_name)
+    result = await db.execute(stmt)
+    app_data = result.scalars().first()
+    
+    if not app_data:
+        return {"exists": False}
+        
+    file_path = app_data.cloud_path
+    if os.path.exists(file_path):
+        mtime = os.path.getmtime(file_path)
+        timestamp_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        size = os.path.getsize(file_path)
+        return {"exists": True, "last_modified": timestamp_str, "size_bytes": size}
+    else:
+        return {"exists": False}

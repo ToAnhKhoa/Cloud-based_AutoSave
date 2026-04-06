@@ -77,7 +77,13 @@ class App(ctk.CTk):
         
         # Initialize background file system watcher using mappings loaded by the dashboard
         from core.sync_engine import SyncEngine
-        self.sync_engine = SyncEngine(mapping_manager=self.dashboard_frame.mapping_manager)
+        self.sync_engine = SyncEngine(
+            mapping_manager=self.dashboard_frame.mapping_manager,
+            user_id=username,
+            api_client=self.api_client,
+            status_callback=self.dashboard_frame.update_app_status,
+            timestamp_callback=self.dashboard_frame.set_last_synced
+        )
         self.sync_engine.start()
         
     def show_dashboard_view(self):
