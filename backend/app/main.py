@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import auth, sync
+from app.api.routes import auth, sync, ai
 from app.models import User, AppData
 
 app = FastAPI(
@@ -21,6 +21,7 @@ app.add_middleware(
 # Configure routing explicitly
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(sync.router, prefix="/api/sync", tags=["Synchronization"])
+app.include_router(ai.router, prefix="/api/ai", tags=["AI Proxy"])
 
 @app.get("/")
 async def root():

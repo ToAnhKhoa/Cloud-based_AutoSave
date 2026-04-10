@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./app.db"
 
+    # API Keys
+    GEMINI_API_KEY: str | None = None
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 # Instantiate settings to be used throughout the application

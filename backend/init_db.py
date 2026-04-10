@@ -5,6 +5,7 @@ from app.db.database import engine, Base
 # CRITICAL: Import models to register them with Base.metadata
 from app.models.user import User
 from app.models.app_data import AppData
+from app.models.game_cache import GamePathCache, GameAlias
 
 async def create_tables():
     """Create all tables stored in this metadata."""

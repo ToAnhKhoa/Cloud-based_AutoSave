@@ -67,6 +67,52 @@ class DashboardFrame(ctk.CTkFrame):
                 self.master.sync_engine.refresh_watchers()
                 self.master.sync_engine.initial_scan(app_name, folder_selected)
 
+    def auto_find_path(self, app_name, btn):
+        import threading
+        def _thread():
+            btn.configure(state="disabled", text="⏳ Asking AI...")
+            result = self.api_client.ask_ai_for_path(app_name)
+            
+            def _handle_result():
+                btn.configure(state="normal", text="✨ Auto-Find (Beta)")
+                
+                if not result:
+                    messagebox.showerror("Error", "No response from AI.")
+                    return
+                if result.get('status') == 'error':
+                    messagebox.showerror("Error", result.get('message', 'Unknown error'))
+                    return
+                
+                official_name = result.get('official_name', app_name)
+                path = result.get('path', '')
+                
+                expanded_path = os.path.expandvars(path)
+                expanded_path = os.path.normpath(expanded_path)
+                
+                if os.path.exists(expanded_path):
+                    msg = f"AI identified this game as '{official_name}'.\nFound path: {expanded_path}\n\nDo you want to map this folder?"
+                    if messagebox.askyesno("AI Found Path", msg):
+                        self.mapping_manager.add_mapping(official_name, expanded_path)
+                        self.refresh_mapping_list()
+                        if hasattr(self.master, "sync_engine") and getattr(self.master, "sync_engine"):
+                            self.master.sync_engine.refresh_watchers()
+                            self.master.sync_engine.initial_scan(official_name, expanded_path)
+                else:
+                    parent_dir = os.path.dirname(expanded_path)
+                    initial_dir = parent_dir if os.path.exists(parent_dir) else os.path.expanduser("~")
+                    
+                    msg = f"AI suggested the path:\n{expanded_path}\n\nHowever, this folder doesn't exist on your PC yet (you might need to launch the game first).\n\nWould you like to browse and select the folder manually?"
+                    if messagebox.askyesno("Path Not Found", msg):
+                        selected_folder = filedialog.askdirectory(initialdir=initial_dir, title=f"Select Save Folder for {official_name}")
+                        if selected_folder:
+                            self.mapping_manager.add_mapping(official_name, selected_folder)
+                            self.refresh_mapping_list()
+                            if hasattr(self.master, "sync_engine") and getattr(self.master, "sync_engine"):
+                                self.master.sync_engine.refresh_watchers()
+                                self.master.sync_engine.initial_scan(official_name, selected_folder)
+            self.after(0, _handle_result)
+            
+        threading.Thread(target=_thread, daemon=True).start()
     def check_queue(self):
         try:
             while True:
@@ -231,6 +277,7 @@ class DashboardFrame(ctk.CTkFrame):
             row_frame.grid_columnconfigure(0, weight=1)
             row_frame.grid_columnconfigure(1, weight=1)
             row_frame.grid_columnconfigure(2, weight=0)
+            row_frame.grid_columnconfigure(3, weight=0)
             
             info_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
             info_frame.grid(row=0, column=0, padx=15, pady=10, sticky="w")
@@ -244,13 +291,24 @@ class DashboardFrame(ctk.CTkFrame):
             status_label = ctk.CTkLabel(row_frame, text="☁️ Not Mapped", text_color="#bdc3c7", font=ctk.CTkFont(size=12))
             status_label.grid(row=0, column=1, padx=15, pady=10, sticky="e")
             
+            auto_find_btn = ctk.CTkButton(
+                row_frame,
+                text="✨ Auto-Find (Beta)",
+                width=120,
+                fg_color="#8e44ad",
+                hover_color="#9b59b6",
+                text_color="white"
+            )
+            auto_find_btn.configure(command=lambda a=app_name, b=auto_find_btn: self.auto_find_path(a, b))
+            auto_find_btn.grid(row=0, column=2, padx=(0, 10), pady=10, sticky="e")
+            
             pull_btn = ctk.CTkButton(
                 row_frame, 
                 text="Map Folder 📁", 
                 width=120, 
                 command=lambda a=app_name: self.map_ghost_app(a)
             )
-            pull_btn.grid(row=0, column=2, padx=(0, 15), pady=10, sticky="e")
+            pull_btn.grid(row=0, column=3, padx=(0, 15), pady=10, sticky="e")
             idx += 1
             
     def open_add_app_popup(self):
@@ -280,6 +338,54 @@ class DashboardFrame(ctk.CTkFrame):
         path_var = ctk.StringVar(value="No folder selected")
         path_label = ctk.CTkLabel(popup, textvariable=path_var, text_color="gray", wraplength=250)
         path_label.grid(row=3, column=0, padx=20, pady=5, sticky="w")
+        
+        def auto_find():
+            app_name = name_entry.get().strip()
+            if not app_name:
+                messagebox.showwarning("Missing Name", "Please enter an application name first.")
+                return
+            
+            import threading
+            def _thread():
+                auto_find_btn.configure(state="disabled", text="⏳ Asking AI...")
+                result = self.api_client.ask_ai_for_path(app_name)
+                
+                def _handle_result():
+                    auto_find_btn.configure(state="normal", text="✨ Auto-Find (Beta)")
+                    if not result:
+                        messagebox.showerror("Error", "No response from AI.")
+                        return
+                    if result.get('status') == 'error':
+                        messagebox.showerror("Error", result.get('message', 'Unknown error'))
+                        return
+                    
+                    official_name = result.get('official_name', app_name)
+                    path = result.get('path', '')
+                    expanded_path = os.path.expandvars(path)
+                    expanded_path = os.path.normpath(expanded_path)
+                    
+                    if os.path.exists(expanded_path):
+                        name_entry.delete(0, 'end')
+                        name_entry.insert(0, official_name)
+                        path_var.set(expanded_path)
+                        messagebox.showinfo("Success", f"Found!\n{expanded_path}")
+                    else:
+                        parent_dir = os.path.dirname(expanded_path)
+                        initial_dir = parent_dir if os.path.exists(parent_dir) else os.path.expanduser("~")
+                        
+                        msg = f"AI suggested the path:\n{expanded_path}\n\nHowever, this folder doesn't exist on your PC yet (you might need to launch the game first).\n\nWould you like to browse and select the folder manually?"
+                        if messagebox.askyesno("Path Not Found", msg):
+                            selected_folder = filedialog.askdirectory(initialdir=initial_dir, title=f"Select Save Folder for {official_name}")
+                            if selected_folder:
+                                name_entry.delete(0, 'end')
+                                name_entry.insert(0, official_name)
+                                path_var.set(selected_folder)
+                
+                self.after(0, _handle_result)
+            threading.Thread(target=_thread, daemon=True).start()
+
+        auto_find_btn = ctk.CTkButton(popup, text="✨ Auto-Find (Beta)", width=130, fg_color="#8e44ad", hover_color="#9b59b6", text_color="white", command=auto_find)
+        auto_find_btn.grid(row=0, column=1, padx=20, pady=(20, 5), sticky="e")
         
         def browse_folder():
             folder_selected = filedialog.askdirectory()

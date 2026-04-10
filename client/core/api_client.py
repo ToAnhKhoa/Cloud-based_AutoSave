@@ -137,6 +137,18 @@ class APIClient:
             print(f"Error getting save info: {e}")
             return {"exists": False, "error": str(e)}
 
+    def ask_ai_for_path(self, app_name: str) -> dict | None:
+        if not self.token:
+            return {"status": "error", "message": "Not authenticated"}
+        try:
+            response = self._make_request("POST", "/api/ai/find-path", json={"app_name": app_name, "os_platform": "Windows"}, timeout=15)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"status": "error", "message": f"HTTP {response.status_code} - {response.text}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     def get_cloud_apps(self) -> list:
         if not self.token:
             return []
