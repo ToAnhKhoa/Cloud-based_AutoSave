@@ -7,8 +7,9 @@ from core.api_client import APIClient
 from gui.login import LoginFrame
 from gui.app import DashboardFrame, SettingsFrame
 
-# Set appearance mode to Dark and color theme to blue
-ctk.set_appearance_mode("Dark")
+from core.settings_manager import SettingsManager
+
+# Set color theme to blue
 ctk.set_default_color_theme("blue")
 
 class App(ctk.CTk):
@@ -17,6 +18,11 @@ class App(ctk.CTk):
     """
     def __init__(self):
         super().__init__()
+        
+        sm = SettingsManager()
+        self.settings_manager = sm # Store globally
+        theme = sm.load().get("theme", "Dark")
+        ctk.set_appearance_mode(theme)
         
         self.title("Cloud Save Client")
         self.geometry("900x600")
@@ -47,6 +53,10 @@ class App(ctk.CTk):
         self.settings_frame = None
         
         self.is_logging_out = False
+        
+        # Minimized logic
+        if self.settings_manager.load().get("start_minimized", False):
+            self.after(100, self.hide_to_tray)
         
         # Start the application by displaying only the login frame
         self.show_login_view()
@@ -102,7 +112,8 @@ class App(ctk.CTk):
             api_client=self.api_client,
             status_callback=self.dashboard_frame.update_app_status,
             timestamp_callback=self.dashboard_frame.set_last_synced,
-            on_auth_error=self.logout
+            on_auth_error=self.logout,
+            toast_callback=self.dashboard_frame.show_toast
         )
         self.sync_engine.run_startup_scan()
         
@@ -113,6 +124,38 @@ class App(ctk.CTk):
     def show_settings_view(self):
         self.dashboard_frame.grid_forget()
         self.settings_frame.grid(row=0, column=1, sticky="nsew")
+
+    def show_toast(self, message, color="#2ecc71"):
+        """Displays a small temporary rectangle box at the bottom right corner of the SCREEN."""
+        if self.settings_manager.load().get("mute_notifications", False):
+            return
+        
+        toast = ctk.CTkToplevel(self)
+        toast.withdraw()
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        
+        frame = ctk.CTkFrame(toast, fg_color=color, corner_radius=8, border_width=1, border_color="#1a1a1a")
+        frame.pack(fill="both", expand=True)
+        
+        prefix = "☁️ " if color == "#2ecc71" else "⚠️ "
+        label = ctk.CTkLabel(frame, text=prefix + message, text_color="white", font=ctk.CTkFont(weight="bold", size=13))
+        label.pack(padx=20, pady=12)
+        
+        toast.update_idletasks()
+        width = frame.winfo_reqwidth()
+        height = frame.winfo_reqheight()
+        
+        screen_width = toast.winfo_screenwidth()
+        screen_height = toast.winfo_screenheight()
+        
+        x = screen_width - width - 25
+        y = screen_height - height - 70
+        
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+        toast.deiconify()
+        
+        self.after(4000, toast.destroy)
 
     def logout(self, message="Your session has expired. Please log in again."):
         """Tears down local state safely and navigates back to login view."""

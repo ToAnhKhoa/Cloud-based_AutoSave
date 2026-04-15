@@ -36,3 +36,11 @@ class MappingManager:
         mappings = self.load_mappings()
         mappings[app_name] = folder_path
         self.save_mappings(mappings)
+
+    def remove_mapping(self, app_name: str):
+        """Removes an app from the mapping dictionary safely."""
+        mappings = self.load_mappings()
+        if app_name in mappings:
+            del mappings[app_name]
+            self.save_mappings(mappings)
+

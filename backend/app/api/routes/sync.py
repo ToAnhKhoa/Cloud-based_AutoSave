@@ -68,12 +68,14 @@ async def get_sync_info(
     if not app_data:
         return {"exists": False}
         
+    has_backup = app_data.backup_date.isoformat() if app_data.backup_date else None
+        
     file_path = app_data.cloud_path
     if os.path.exists(file_path):
         mtime = os.path.getmtime(file_path)
         timestamp_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
         size = os.path.getsize(file_path)
-        return {"exists": True, "last_modified": timestamp_str, "size_bytes": size}
+        return {"exists": True, "last_modified": timestamp_str, "size_bytes": size, "has_backup": has_backup}
     else:
         return {"exists": False}
 

@@ -58,13 +58,14 @@ class SyncEngine:
     """
     Manages background file observation spanning across multiple user mappings.
     """
-    def __init__(self, mapping_manager, user_id: str, api_client, status_callback=None, timestamp_callback=None, on_auth_error=None):
+    def __init__(self, mapping_manager, user_id: str, api_client, status_callback=None, timestamp_callback=None, on_auth_error=None, toast_callback=None):
         self.mapping_manager = mapping_manager
         self.user_id = user_id
         self.api_client = api_client
         self.status_callback = status_callback
         self.timestamp_callback = timestamp_callback
         self.on_auth_error = on_auth_error
+        self.toast_callback = toast_callback
         self.observer = Observer()
         self.watchers = []
         self.ignored_apps_for_watchdog = set()
@@ -107,11 +108,15 @@ class SyncEngine:
                 if self.status_callback:
                     self.status_callback(app_name, "✅ Sync Complete!", "#2ecc71")
                     threading.Timer(3.0, lambda: self._revert_status(app_name)).start()
+                if self.toast_callback:
+                    self.toast_callback(f"Uploaded {app_name} to cloud!", "#2ecc71")
             else:
                 print("[SyncEngine] Upload failed.")
                 if self.status_callback:
                     self.status_callback(app_name, "❌ Sync Failed!", "#e74c3c")
                     threading.Timer(5.0, lambda: self._revert_status(app_name)).start()
+                if self.toast_callback:
+                    self.toast_callback(f"Failed to upload {app_name}", "#e74c3c")
                     
             # Cleanup temp file
             if os.path.exists(zip_path):
@@ -153,9 +158,13 @@ class SyncEngine:
                     self.start_watching(app_name, folder_path)
                     if self.status_callback:
                         self.status_callback(app_name, "✅ Restoration Complete!", "#2ecc71")
+                    if self.toast_callback:
+                        self.toast_callback(f"Downloaded {app_name} from cloud!", "#2ecc71")
                 else:
                     if self.status_callback:
                         self.status_callback(app_name, "❌ Restoration Failed", "#e74c3c")
+                    if self.toast_callback:
+                        self.toast_callback(f"Failed to download {app_name}", "#e74c3c")
             except SessionExpiredError:
                 if self.status_callback:
                     self.status_callback(app_name, "🔴 Session Expired", "#e74c3c")
@@ -244,17 +253,38 @@ class SyncEngine:
                 return
                 
         if os.path.exists(folder_path):
-            watcher = FolderWatcher(app_name, folder_path, self.sync_callback, status_callback=self.status_callback)
+            from core.settings_manager import SettingsManager
+            current_debounce = SettingsManager().load().get("debounce_time", 3.0)
+            watcher = FolderWatcher(app_name, folder_path, self.sync_callback, status_callback=self.status_callback, debounce_seconds=current_debounce)
             self.watchers.append(watcher)
             self.observer.schedule(watcher, folder_path, recursive=True)
-            print(f"[SyncEngine] Scheduled background watch for {app_name} at {folder_path}")
+            print(f"[SyncEngine] Scheduled background watch for {app_name} at {folder_path} with {current_debounce}s debounce")
 
+    def update_debounce_time(self, new_debounce):
+        for watcher in self.watchers:
+            watcher.debounce_seconds = float(new_debounce)
+            
     def refresh_watchers(self):
         """Clear existing watchers and re-schedule from current mappings."""
         self.observer.unschedule_all()
         self.watchers.clear()
         
         print(f"[SyncEngine] Watchers cleared! Currently watching 0 folders.")
+
+    def remove_mapping(self, app_name: str):
+        """Unhooks watchdog and deletes mapping from local config."""
+        if hasattr(self.mapping_manager, 'remove_mapping'):
+            self.mapping_manager.remove_mapping(app_name)
+        
+        # Completely nuke watchers and recreate them for the remaining maps
+        self.refresh_watchers()
+        mappings = self.mapping_manager.load_mappings()
+        if mappings:
+            for name, path in mappings.items():
+                # We skip initial_scan here to avoid network calls on UI delete
+                # assuming the state was already stable. Just attach hardware watchdog.
+                if self.sync_states.get(name) in ['in_sync']:
+                    self.start_watching(name, path)
 
     def run_startup_scan(self):
         """

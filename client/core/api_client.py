@@ -2,6 +2,35 @@ import requests
 import shutil
 import tempfile
 import os
+import time
+
+class RateLimitedFile(object):
+    def __init__(self, file_obj, max_kbps):
+        self.file_obj = file_obj
+        self.max_bps = float(max_kbps) * 1024.0
+        self.start_time = time.time()
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        if self.max_bps <= 0:
+            return self.file_obj.read(size)
+            
+        chunk = self.file_obj.read(size)
+        if not chunk:
+            return chunk
+            
+        self.bytes_read += len(chunk)
+        elapsed = time.time() - self.start_time
+        expected_time = self.bytes_read / self.max_bps
+        
+        if expected_time > elapsed:
+            time.sleep(expected_time - elapsed)
+            
+        return chunk
+        
+    @property
+    def len(self):
+        return os.fstat(self.file_obj.fileno()).st_size
 
 class SessionExpiredError(Exception):
     """Raised when the backend returns a 401 Unauthorized, indicating JWT expiration."""
@@ -82,8 +111,16 @@ class APIClient:
             
         data = {"app_name": app_name}
         try:
+            from core.settings_manager import SettingsManager
+            kbps = SettingsManager().load().get("bandwidth_limit_kbps", 0.0)
+            
             with open(zip_file_path, "rb") as f:
-                files = {"file": f}
+                if kbps > 0:
+                    f_wrapped = RateLimitedFile(f, kbps)
+                    files = {"file": (os.path.basename(zip_file_path), f_wrapped)}
+                else:
+                    files = {"file": f}
+                    
                 response = self._make_request("POST", "/api/sync/upload", data=data, files=files)
             
             if response.status_code == 200:
@@ -104,10 +141,25 @@ class APIClient:
         try:
             response = self._make_request("GET", f"/api/sync/download/{app_name}", stream=True)
             if response.status_code == 200:
+                from core.settings_manager import SettingsManager
+                kbps = SettingsManager().load().get("bandwidth_limit_kbps", 0.0)
+                max_bps = float(kbps) * 1024.0
+                
                 temp_zip_path = tempfile.mktemp(suffix=".zip")
                 with open(temp_zip_path, "wb") as f:
+                    start_time = time.time()
+                    bytes_written = 0
+                    
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
+                        
+                        if max_bps > 0:
+                            bytes_written += len(chunk)
+                            elapsed = time.time() - start_time
+                            expected = bytes_written / max_bps
+                            if expected > elapsed:
+                                time.sleep(expected - elapsed)
+                                
                 shutil.unpack_archive(temp_zip_path, extract_to_path)
                 if os.path.exists(temp_zip_path):
                     os.remove(temp_zip_path)
@@ -162,3 +214,37 @@ class APIClient:
         except Exception as e:
             print(f"Error getting cloud apps: {e}")
         return []
+
+    def delete_cloud_app(self, app_name: str) -> bool:
+        if not self.token:
+            return False
+            
+        try:
+            response = self._make_request("DELETE", f"/api/apps/{app_name}", timeout=5)
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"Delete failed: HTTP {response.status_code} - {response.text}")
+                return False
+        except SessionExpiredError:
+            raise
+        except Exception as e:
+            print(f"Error deleting cloud app: {e}")
+            return False
+
+    def rollback_cloud_app(self, app_name: str) -> bool:
+        if not self.token:
+            return False
+            
+        try:
+            response = self._make_request("POST", f"/api/apps/{app_name}/rollback", timeout=10)
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"Rollback failed: HTTP {response.status_code} - {response.text}")
+                return False
+        except SessionExpiredError:
+            raise
+        except Exception as e:
+            print(f"Error rolling back cloud app: {e}")
+            return False

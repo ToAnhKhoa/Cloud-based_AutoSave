@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Date, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -13,6 +13,8 @@ class AppData(Base):
     checksum = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    backup_updated_at = Column(DateTime(timezone=True), nullable=True)
+    backup_date = Column(Date, nullable=True)
 
     # Relationship to User
     owner = relationship("User", back_populates="app_data")
