@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # API Keys
     GEMINI_API_KEY: str | None = None
+    GEMINI_API_ENDPOINT: str | None = None  # Cloudflare Worker proxy URL to bypass geo-restrictions
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

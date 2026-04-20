@@ -11,11 +11,13 @@ from datetime import datetime, timezone
 
 async def process_file_upload(db: AsyncSession, user: User, app_name: str, file: UploadFile) -> AppData:
     """Save physical file and create/update AppData metadata record with rolling backup."""
-    storage_dir = os.path.join("storage", str(user.id))
+    storage_dir = f"storage/{user.id}"
     os.makedirs(storage_dir, exist_ok=True)
     
-    cloud_path = os.path.join(storage_dir, f"{app_name}.zip")
-    backup_path = os.path.join(storage_dir, f"{app_name}_backup.zip")
+    # Use forward slashes explicitly — os.path.join uses backslashes on Windows,
+    # which breaks on the Linux server if the path gets stored in the DB.
+    cloud_path = f"storage/{user.id}/{app_name}.zip"
+    backup_path = f"storage/{user.id}/{app_name}_backup.zip"
 
     # Query AppData to get the existing record and its timestamp
     stmt = select(AppData).where(AppData.user_id == user.id, AppData.app_name == app_name)

@@ -17,3 +17,9 @@ client/local_mapping.json
 # Các file cấu hình hệ điều hành
 .DS_Store
 Thumbs.db
+
+# Build and packaging output
+client/build/
+client/dist/
+*.spec
+*.zip

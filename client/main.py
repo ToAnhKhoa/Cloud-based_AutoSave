@@ -31,7 +31,7 @@ class App(ctk.CTk):
         self.protocol('WM_DELETE_WINDOW', self.hide_to_tray)
         
         # Centrally instantiate the APIClient
-        self.api_client = APIClient(base_url="http://127.0.0.1:8000")
+        self.api_client = APIClient(base_url="https://cloudsave-kel.southeastasia.cloudapp.azure.com")
         
         # --- UI Sub-components ---
         self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)

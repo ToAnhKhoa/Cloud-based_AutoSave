@@ -37,7 +37,7 @@ class SessionExpiredError(Exception):
     pass
 
 class APIClient:
-    def __init__(self, base_url="http://127.0.0.1:8000"):
+    def __init__(self, base_url="https://cloudsave-kel.southeastasia.cloudapp.azure.com"):
         self.base_url = base_url
         self.token = None
 
@@ -72,7 +72,7 @@ class APIClient:
         
         try:
             # We explicitly bypass _make_request here because login triggers initial auth creation natively
-            response = requests.post(f"{self.base_url}/api/auth/login", data=data, timeout=5)
+            response = requests.post(f"{self.base_url}/api/auth/login", data=data, timeout=15)
             
             if response.status_code == 200:
                 json_data = response.json()
@@ -92,15 +92,21 @@ class APIClient:
             "password": password
         }
         try:
-            response = requests.post(f"{self.base_url}/api/auth/register", json=json_data, timeout=5)
+            response = requests.post(f"{self.base_url}/api/auth/register", json=json_data, timeout=15)
             if response.status_code in (200, 201):
                 return True, "Registration successful! You can now log in."
+            elif response.status_code == 502:
+                return False, "Server unavailable or starting up (502 Bad Gateway)."
+            elif response.status_code == 404:
+                return False, "Server not found (404 Not Found)."
             else:
                 try:
                     error_msg = response.json().get("detail", "Registration failed.")
                 except ValueError:
-                    error_msg = f"HTTP {response.status_code}"
+                    error_msg = f"HTTP {response.status_code} Error."
                 return False, error_msg
+        except requests.exceptions.ConnectionError:
+            return False, "Cannot connect to server. Is it online?"
         except requests.exceptions.RequestException as e:
             print(f"Registration connection error: {e}")
             return False, "Connection error to server."

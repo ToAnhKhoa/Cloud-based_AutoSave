@@ -208,13 +208,16 @@ class DashboardFrame(ctk.CTkFrame):
             messagebox.showinfo("In Sync", f"{app_name} is already fully synchronized!")
 
     def refresh_mapping_list(self):
+        old_statuses = getattr(self, "current_statuses", {}).copy()
+        old_times = getattr(self, "last_synced_times", {}).copy()
+        
         # Clear existing children
         for child in self.mappings_frame.winfo_children():
             child.destroy()
             
         self.status_labels = {}
         self.current_statuses = {}
-        self.last_synced_times = {}
+        self.last_synced_times = old_times
             
         mappings = self.mapping_manager.load_mappings()
         ghost_apps = [app for app in getattr(self, "cloud_apps", []) if app not in mappings]
@@ -266,7 +269,8 @@ class DashboardFrame(ctk.CTkFrame):
             name_label = ctk.CTkLabel(info_frame, text=app_name, font=ctk.CTkFont(size=14, weight="bold"), cursor="hand2")
             name_label.grid(row=0, column=0, sticky="w")
             
-            status_label = ctk.CTkLabel(info_frame, text="🔍 Scanning...", text_color="#3498db", font=ctk.CTkFont(size=12))
+            saved_status = old_statuses.get(app_name, {"msg": "🔍 Scanning...", "color": "#3498db"})
+            status_label = ctk.CTkLabel(info_frame, text=saved_status["msg"], text_color=saved_status["color"], font=ctk.CTkFont(size=12))
             status_label.grid(row=1, column=0, sticky="w")
             
             def _show_path(e, p=path, l=status_label):
@@ -279,7 +283,7 @@ class DashboardFrame(ctk.CTkFrame):
             status_label.bind("<Enter>", lambda e, name=app_name: _on_enter(e, name))
             status_label.bind("<Leave>", lambda e, name=app_name: _on_leave(e, name))
             self.status_labels[app_name] = status_label
-            self.current_statuses[app_name] = {"msg": "🔍 Scanning...", "color": "#3498db"}
+            self.current_statuses[app_name] = saved_status
             
             pull_btn = ctk.CTkButton(
                 row_frame, 
@@ -393,6 +397,8 @@ class DashboardFrame(ctk.CTkFrame):
             else:
                 self.mapping_manager.remove_mapping(app_name)
             self.refresh_mapping_list()
+            import threading
+            threading.Thread(target=self._fetch_cloud_apps, daemon=True).start()
             self.show_toast(f"Unmapped {app_name} locally.", "#f39c12")
 
     def delete_app_from_cloud(self, app_name):
