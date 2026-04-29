@@ -6,12 +6,15 @@ from sqlalchemy.future import select
 from app.api.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.models.app_data import AppData
+from app.services.audit_service import log_audit
+from fastapi import BackgroundTasks
 
 router = APIRouter()
 
 @router.delete("/{app_name}")
 async def delete_app(
     app_name: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -33,11 +36,19 @@ async def delete_app(
     await db.delete(app)
     await db.commit()
     
+    background_tasks.add_task(
+        log_audit,
+        user_id=current_user.id,
+        action="DELETE",
+        details=f"Annihilated {app_name} cloud branch and removed all traces."
+    )
+    
     return {"status": "success", "message": f"Deleted {app_name} and its cloud backup."}
 
 @router.post("/{app_name}/rollback")
 async def rollback_app(
     app_name: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -70,6 +81,13 @@ async def rollback_app(
         app_data.backup_date = None
         
         await db.commit()
+        
+        background_tasks.add_task(
+            log_audit,
+            user_id=current_user.id,
+            action="ROLLBACK",
+            details=f"Restored {app_name} to previous snapshot."
+        )
         
         return {"status": "success", "message": f"Successfully rolled back {app_name} to previous version."}
     except Exception as e:

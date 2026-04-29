@@ -1,5 +1,8 @@
 {
-    "start_with_windows": false,
+    "start_with_windows": true,
+    "start_minimized": false,
+    "mute_notifications": false,
+    "bandwidth_limit_kbps": 0.0,
     "debounce_time": 3.0,
     "theme": "Dark"
 }

@@ -8,8 +8,10 @@ from sqlalchemy.future import select
 from app.api.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.models.app_data import AppData
-from app.schemas.sync import SyncResponse
+from app.schemas.sync import SyncResponse, CheckHashRequest
 from app.services import sync_service
+from app.services.audit_service import log_audit
+from fastapi import BackgroundTasks
 
 router = APIRouter()
 
@@ -20,13 +22,23 @@ async def sync_status(current_user: User = Depends(get_current_user)):
 
 @router.post("/upload", response_model=SyncResponse)
 async def upload_sync_data(
+    background_tasks: BackgroundTasks,
     app_name: str = Form(...),
+    device_name: str = Form("Unknown Device"),
+    sha256_checksum: str = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Upload physical app data and update metadata."""
-    app_data = await sync_service.process_file_upload(db, current_user, app_name, file)
+    app_data = await sync_service.process_file_upload(db, current_user, app_name, device_name, file, sha256_checksum)
+    
+    background_tasks.add_task(
+        log_audit,
+        user_id=current_user.id,
+        action="UPLOAD",
+        details=f"Uploaded {app_name} mapped to {device_name} (Size: {app_data.file_size} bytes)."
+    )
     
     return SyncResponse(
         message="Successfully synchronized file",
@@ -37,6 +49,7 @@ async def upload_sync_data(
 @router.get("/download/{app_name}")
 async def download_sync_data(
     app_name: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -50,6 +63,13 @@ async def download_sync_data(
             status_code=status.HTTP_404_NOT_FOUND, 
             detail="App data not found for the requested application"
         )
+        
+    background_tasks.add_task(
+        log_audit,
+        user_id=current_user.id,
+        action="DOWNLOAD",
+        details=f"Pulled {app_name} strictly down to local machine."
+    )
         
     # the frontend client will download the literal .zip file representation
     return FileResponse(path=app_data.cloud_path, filename=f"{app_name}.zip")
@@ -90,3 +110,23 @@ async def list_sync_data(
     apps = result.scalars().all()
     
     return {"cloud_apps": list(apps)}
+
+@router.post("/check_hash")
+async def check_hash(
+    request: CheckHashRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify if the client needs to upload the payload based on SHA-256 checksum."""
+    stmt = select(AppData).where(
+        AppData.user_id == current_user.id,
+        AppData.app_name == request.app_name
+    )
+    result = await db.execute(stmt)
+    app_data = result.scalars().first()
+    
+    if app_data and app_data.checksum == request.sha256_checksum:
+        return {"upload_required": False}
+        
+    return {"upload_required": True}
+

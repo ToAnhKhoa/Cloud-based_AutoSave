@@ -15,6 +15,7 @@ class AppData(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     backup_updated_at = Column(DateTime(timezone=True), nullable=True)
     backup_date = Column(Date, nullable=True)
+    last_synced_device = Column(String, nullable=True, default="Unknown Device")
 
     # Relationship to User
     owner = relationship("User", back_populates="app_data")

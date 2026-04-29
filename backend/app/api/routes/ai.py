@@ -125,3 +125,51 @@ Error: {{"status": "error", "message": "Could not recognize the game."}}"""
             status_code=500,
             detail={"error": "Gemini API call failed", "message": str(e)}
         )
+
+from fastapi.responses import HTMLResponse
+
+@router.get("/debug/aliases", response_class=HTMLResponse)
+async def get_debug_aliases(db: AsyncSession = Depends(get_db)):
+    """Public debug endpoint to view the alias table cache as formatted HTML."""
+    stmt = select(GameAlias, GamePathCache).join(GamePathCache, GameAlias.game_id == GamePathCache.id)
+    result = await db.execute(stmt)
+    rows = result.all()
+    
+    html_content = """
+    <html>
+        <head>
+            <title>Alias Table Cache</title>
+            <style>
+                body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
+                table { border-collapse: collapse; width: 100%; margin-top: 20px; background-color: white; }
+                th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+                th { background-color: #2c3e50; color: white; }
+                tr:hover { background-color: #f5f5f5; }
+            </style>
+        </head>
+        <body>
+            <h2> AI Game Alias Cache</h2>
+            <table>
+                <tr>
+                    <th>User Input (Shorthand)</th>
+                    <th>Official Name (Resolved)</th>
+                    <th>Save Path</th>
+                </tr>
+    """
+    
+    for alias, game in rows:
+        html_content += f"""
+                <tr>
+                    <td><code>{alias.user_input}</code></td>
+                    <td><strong>{game.official_name}</strong></td>
+                    <td><code>{game.default_path}</code></td>
+                </tr>
+        """
+        
+    html_content += """
+            </table>
+        </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)

@@ -1,6 +1,10 @@
 from pydantic import BaseModel
 from datetime import datetime
 
+class CheckHashRequest(BaseModel):
+    app_name: str
+    sha256_checksum: str
+
 class SyncRequest(BaseModel):
     app_name: str
     checksum: str

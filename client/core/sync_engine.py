@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import datetime
+import hashlib
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from core.api_client import SessionExpiredError
@@ -75,6 +76,13 @@ class SyncEngine:
         if self.status_callback:
             self.status_callback(app_name, "🟢 Monitoring...", "#2ecc71")
 
+    def _calculate_sha256(self, file_path: str) -> str:
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+
     def _perform_upload(self, app_name, folder_path):
         if not os.path.exists(folder_path) or len(os.listdir(folder_path)) == 0:
             if self.status_callback:
@@ -93,8 +101,23 @@ class SyncEngine:
             # Make a zip file
             zip_path = shutil.make_archive(temp_base_name, 'zip', root_dir=folder_path)
             
+            # Differential Sync
+            checksum = self._calculate_sha256(zip_path)
+            upload_required = self.api_client.check_hash(app_name, checksum)
+            
+            if not upload_required:
+                print(f"[SyncEngine] Payload for {app_name} unchanged, skipping upload.")
+                if self.status_callback:
+                    self.status_callback(app_name, "✅ Sync Complete (No Changes)!", "#2ecc71")
+                    threading.Timer(3.0, lambda: self._revert_status(app_name)).start()
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                self.sync_states[app_name] = 'in_sync'
+                self.start_watching(app_name, folder_path)
+                return
+            
             # Upload via API
-            success = self.api_client.upload_save(app_name, zip_path)
+            success = self.api_client.upload_save(app_name, zip_path, sha256_checksum=checksum)
             
             if success:
                 print("[SyncEngine] Upload successful to Backend!")

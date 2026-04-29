@@ -40,7 +40,8 @@ class DashboardFrame(ctk.CTkFrame):
         # Initialize
         self.cloud_apps = []
         self.refresh_mapping_list()
-        
+
+
         # Thread-safe UI queue
         self.message_queue = queue.Queue()
         self.check_queue()
@@ -51,12 +52,13 @@ class DashboardFrame(ctk.CTkFrame):
     def _fetch_cloud_apps(self):
         try:
             apps = self.api_client.get_cloud_apps()
-            self.after(0, self._render_ghost_apps, apps)
+            self.after(0, self._render_cloud_data, apps)
         except SessionExpiredError:
             self.after(0, self.master.logout)
 
-    def _render_ghost_apps(self, cloud_apps):
+    def _render_cloud_data(self, cloud_apps):
         self.cloud_apps = cloud_apps
+        
         self.refresh_mapping_list()
 
     def map_ghost_app(self, app_name):

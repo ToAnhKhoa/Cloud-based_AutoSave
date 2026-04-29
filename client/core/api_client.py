@@ -37,7 +37,7 @@ class SessionExpiredError(Exception):
     pass
 
 class APIClient:
-    def __init__(self, base_url="https://cloudsave-kel.southeastasia.cloudapp.azure.com"):
+    def __init__(self, base_url="http://127.0.0.1:8000"):
         self.base_url = base_url
         self.token = None
 
@@ -111,11 +111,20 @@ class APIClient:
             print(f"Registration connection error: {e}")
             return False, "Connection error to server."
 
-    def upload_save(self, app_name: str, zip_file_path: str):
+    def upload_save(self, app_name: str, zip_file_path: str, sha256_checksum: str = None):
         if not self.token:
             return False
             
-        data = {"app_name": app_name}
+        import socket
+        try:
+            device_name = socket.gethostname()
+        except Exception:
+            device_name = "Unknown Windows PC"
+            
+        data = {"app_name": app_name, "device_name": device_name}
+        if sha256_checksum:
+            data["sha256_checksum"] = sha256_checksum
+            
         try:
             from core.settings_manager import SettingsManager
             kbps = SettingsManager().load().get("bandwidth_limit_kbps", 0.0)
@@ -254,3 +263,18 @@ class APIClient:
         except Exception as e:
             print(f"Error rolling back cloud app: {e}")
             return False
+
+    def check_hash(self, app_name: str, sha256_checksum: str) -> bool:
+        if not self.token:
+            return True
+            
+        try:
+            response = self._make_request("POST", "/api/sync/check_hash", json={"app_name": app_name, "sha256_checksum": sha256_checksum}, timeout=10)
+            if response.status_code == 200:
+                return response.json().get("upload_required", True)
+            return True
+        except SessionExpiredError:
+            raise
+        except Exception as e:
+            print(f"Error checking hash: {e}")
+            return True
